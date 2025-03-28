@@ -68,7 +68,7 @@ int main() {
     CURLcode res;
     ResponseData chunk = {0};
     char cidade[50];
-    const char *api_key = "cdb136214fedd37bcd6d553b3ce8fc14"; // Sua chave
+    const char *api_key = "SUA CHAVE AQUI"; // Sua chave
     
     // Interface inicial
     printf("================================\n");
