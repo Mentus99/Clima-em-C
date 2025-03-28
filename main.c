@@ -2,97 +2,137 @@
 #include <stdlib.h>
 #include <string.h>
 #include <curl/curl.h>
+#include <windows.h>
 
-// Estrutura para armazenar dados do clima
-struct WeatherData {
-    char cidade[50];
-    float temperatura;
-    int umidade;
-    char condicao[50];
-};
+// Estrutura para armazenar dados da resposta HTTP
+typedef struct {
+    char *data;
+    size_t size;
+} ResponseData;
 
-// Função para processar a resposta JSON (simplificada)
-void parse_weather_json(const char* json, struct WeatherData* wd) {
-    // Extrai dados básicos do JSON (implementação simplificada)
-    char temp_str[10], humidity_str[10];
-    
-    // Extrai temperatura (em uma implementação real, use uma biblioteca JSON)
-    const char* temp_ptr = strstr(json, "\"temp\":");
-    if (temp_ptr) {
-        sscanf(temp_ptr, "\"temp\":%f", &wd->temperatura);
-    }
-    
-    // Extrai umidade
-    const char* humidity_ptr = strstr(json, "\"humidity\":");
-    if (humidity_ptr) {
-        sscanf(humidity_ptr, "\"humidity\":%d", &wd->umidade);
-    }
-    
-    // Extrai condição climática
-    const char* main_ptr = strstr(json, "\"main\":\"");
-    if (main_ptr) {
-        sscanf(main_ptr, "\"main\":\"%49[^\"]", wd->condicao);
-    }
-}
-
-// Callback para receber dados da API
-size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
+// Callback para escrever os dados recebidos
+size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t realsize = size * nmemb;
-    struct WeatherData* wd = (struct WeatherData*)userp;
-    
-    // Processa o JSON recebido
-    parse_weather_json((const char*)contents, wd);
+    ResponseData *mem = (ResponseData *)userp;
+
+    char *ptr = realloc(mem->data, mem->size + realsize + 1);
+    if(!ptr) return 0;
+
+    mem->data = ptr;
+    memcpy(&(mem->data[mem->size]), contents, realsize);
+    mem->size += realsize;
+    mem->data[mem->size] = '\0';
     return realsize;
 }
 
-// Função principal
+// Função para extrair valores do JSON
+void extract_json_value(const char *json, const char *key, char *output, int max_len) {
+    char search_str[50];
+    sprintf(search_str, "\"%s\":", key);
+    
+    const char *start = strstr(json, search_str);
+    if (!start) {
+        output[0] = '\0';
+        return;
+    }
+    
+    start += strlen(search_str);
+    while (*start == ' ' || *start == '\"' || *start == ':') start++;
+    
+    int i = 0;
+    while (i < max_len - 1 && start[i] != ',' && start[i] != '}' && start[i] != '\"') {
+        output[i] = start[i];
+        i++;
+    }
+    output[i] = '\0';
+}
+
+// Configura o console para UTF-8
+void setup_console() {
+    SetConsoleOutputCP(65001);
+    SetConsoleCP(65001);
+}
+
+// Função para exibir erros em vermelho
+void print_error(const char *message) {
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    SetConsoleTextAttribute(hConsole, 12); // Vermelho
+    printf("%s\n", message);
+    SetConsoleTextAttribute(hConsole, 7); // Volta ao normal
+}
+
 int main() {
-    CURL* curl;
+    setup_console();
+    
+    CURL *curl;
     CURLcode res;
-    struct WeatherData clima = {0};
+    ResponseData chunk = {0};
+    char cidade[50];
+    const char *api_key = "cdb136214fedd37bcd6d553b3ce8fc14"; // Sua chave
     
-    // Configuração inicial
-    printf("🌤️ App de Clima em Tempo Real 🌤️\n");
-    printf("Digite sua cidade: ");
-    scanf("%49s", clima.cidade);
+    // Interface inicial
+    printf("================================\n");
+    printf("    APP DE CLIMA EM TEMPO REAL   \n");
+    printf("================================\n\n");
+    printf("Digite a cidade (ex: Brasilia): ");
     
+    if (scanf("%49s", cidade) != 1) {
+        print_error("Erro ao ler a cidade.");
+        return 1;
+    }
+
     // Inicializa cURL
     curl_global_init(CURL_GLOBAL_DEFAULT);
     curl = curl_easy_init();
     
     if(curl) {
         char url[256];
-        const char* api_key = "cdb136214fedd37bcd6d553b3ce8fc14"; // Substitua pela sua chave
-        
-        // Monta a URL da API
         snprintf(url, sizeof(url), 
                 "https://api.openweathermap.org/data/2.5/weather?q=%s&appid=%s&units=metric&lang=pt",
-                clima.cidade, api_key);
-        
-        // Configura a requisição
+                cidade, api_key);
+
         curl_easy_setopt(curl, CURLOPT_URL, url);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &clima);
-        
-        // Executa a requisição
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L); // Timeout de 10 segundos
+
+        printf("\nObtendo dados...\n");
         res = curl_easy_perform(curl);
         
         if(res != CURLE_OK) {
-            fprintf(stderr, "Erro na requisição: %s\n", curl_easy_strerror(res));
+            print_error(curl_easy_strerror(res));
+        } else if (chunk.data) {
+            // Extrai dados do JSON
+            char temp[10], humidity[10], desc[50], feels_like[10];
+            
+            extract_json_value(chunk.data, "temp", temp, sizeof(temp));
+            extract_json_value(chunk.data, "humidity", humidity, sizeof(humidity));
+            extract_json_value(chunk.data, "description", desc, sizeof(desc));
+            extract_json_value(chunk.data, "feels_like", feels_like, sizeof(feels_like));
+            
+            // Exibe resultados formatados
+            printf("\n=== DADOS METEOROLÓGICOS ===\n");
+            printf("📍 Cidade: %s\n", cidade);
+            printf("🌡️  Temperatura: %s°C\n", temp);
+            printf("💧 Umidade: %s%%\n", humidity);
+            printf("🌦️  Condição: %s\n", desc);
+            printf("🤔 Sensação Térmica: %s°C\n", feels_like);
+            printf("============================\n");
         } else {
-            // Exibe os resultados
-            printf("\n=== Dados do Clima ===\n");
-            printf("Cidade: %s\n", clima.cidade);
-            printf("Temperatura: %.1f°C\n", clima.temperatura);
-            printf("Umidade: %d%%\n", clima.umidade);
-            printf("Condição: %s\n", clima.condicao);
-            printf("======================\n");
+            print_error("Nenhum dado recebido da API.");
         }
         
         // Limpeza
+        if(chunk.data) free(chunk.data);
         curl_easy_cleanup(curl);
+    } else {
+        print_error("Falha ao inicializar cURL.");
     }
     
     curl_global_cleanup();
+    
+    printf("\nPressione ENTER para sair...");
+    getchar();
+    getchar();
     return 0;
 }
