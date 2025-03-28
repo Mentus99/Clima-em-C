@@ -14,7 +14,7 @@ Aplicativo de console que mostra dados meteorológicos em tempo real usando a AP
 ## 🚀 Configuração Rápida
 ```bash
 # Clone o repositório
-git clone https://github.com/G2bryel/Clima-em-C.git
+git clone https://github.com/Mentus99/Clima-em-C.git
 cd Clima-em-C
 
 # Configure sua API Key (edite o arquivo main.c)
